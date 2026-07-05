@@ -1,0 +1,16 @@
+# Binaries
+/media-merge
+*.exe
+
+# Go build/test artifacts
+*.test
+*.out
+
+# Node / Next.js (pre-rewrite snapshot)
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+
+# OS
+.DS_Store
