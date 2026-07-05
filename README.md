@@ -57,6 +57,11 @@ Suggested order: `Scan` → `HashFile` → `FindDuplicates` →
 `WastedBytes`/`FormatSize` → `Delete` → `Move`. Each stub's comment lists
 hints and edge cases (symlinks, name collisions on move, error strategy).
 
+Stuck? Open **[HINTS.md](HINTS.md)** — a cheatsheet with three levels of
+folded hints per function, from gentle nudge to near-solution. And
+`CLAUDE.md` instructs Claude to answer implementation questions with hints
+rather than full solutions, so asking for help won't spoil the exercise.
+
 ## Roadmap
 
 1. **Exact dedup** — the current skeleton: hash, group, report, delete/move.
