@@ -1,69 +1,69 @@
-# Media Merge
+# media-merge
 
-Combine several folders of media into one clean folder: exact duplicates are
-removed (across images, video, and audio) and visually-similar images are
-grouped into subfolders that you confirm before exporting. The result is
-downloaded as `merged.zip`.
+A CLI tool that finds exact duplicate files in a directory. By default it
+only reports — nothing on disk changes unless you explicitly ask.
 
-- **Frontend:** Next.js (App Router, TypeScript, Tailwind) in `web/`
-- **Backend:** Go HTTP server in `server/`
+> **Status:** learning project. The CLI shell, package layout, and a full
+> test suite are in place; the logic in `internal/dedup` is intentionally
+> unimplemented so it can be written by hand, test by test.
+
+## Install
+
+```bash
+go install github.com/timl/media-merge/cmd/media-merge@latest
+```
+
+Or from a checkout:
+
+```bash
+go install ./cmd/media-merge
+```
+
+## Usage
+
+```bash
+media-merge ~/Pictures            # dry-run: report duplicates + wasted space
+media-merge -delete ~/Pictures    # delete duplicate copies (keeps one of each)
+media-merge -move ~/Pictures      # move duplicates into ~/Pictures/duplicates/
+```
+
+`-delete` and `-move` are mutually exclusive. A dry-run prints something like:
+
+```
+37 duplicate file(s), 412.6 MB wasted
+```
 
 ## How it works
 
-1. Select one or more folders in the browser. Files upload to the server.
-2. The server hashes every file (SHA-256) and removes byte-exact duplicates,
-   then perceptually hashes images and clusters visually-similar ones.
-3. You review/adjust the proposed similarity groups.
-4. The server builds and returns `merged.zip`:
+1. **Scan** — walk the directory tree and collect every regular file
+   (`internal/dedup/scan.go`).
+2. **Hash** — SHA-256 each file, streaming so large media files don't
+   blow up memory (`internal/dedup/hash.go`).
+3. **Group** — files with identical hashes form a group: one keeper,
+   the rest are duplicates (`internal/dedup/dedup.go`).
+4. **Apply** — only with a flag: delete the duplicates, or move them to a
+   `duplicates/` subfolder (`internal/dedup/apply.go`).
 
-   ```
-   merged/
-     image-group-001/   # confirmed similar images
-     images/            # unique images with no similar match
-     video/  audio/  other/
-   ```
+## Working on it
 
-**Note:** HEIC/HEIF files are exact-deduped and placed by type but are skipped
-for visual grouping (no robust pure-Go decoder).
-
-## Running locally
-
-Backend (defaults to `:8080`):
+The tests describe the intended behavior and currently fail on the
+unimplemented stubs — implement until they pass:
 
 ```bash
-cd server
-go run ./cmd/server
+go test ./...
 ```
 
-Frontend (defaults to talking to `http://localhost:8080`):
+Suggested order: `Scan` → `HashFile` → `FindDuplicates` →
+`WastedBytes`/`FormatSize` → `Delete` → `Move`. Each stub's comment lists
+hints and edge cases (symlinks, name collisions on move, error strategy).
 
-```bash
-cd web
-npm install      # first time only
-npm run dev      # http://localhost:3000
-```
+## Roadmap
 
-In split dev the frontend (`:3000`) reaches the API (`:8080`) via
-`web/.env.development`. Override the API base with `NEXT_PUBLIC_API_BASE` and the
-server address with `MEDIA_MERGE_ADDR` / work directory with `MEDIA_MERGE_WORKDIR`.
-
-## Run with Docker
-
-The frontend is built to static files and served by the Go server, so the whole
-app runs as a single container on one port:
-
-```bash
-docker build -t media-merge .
-docker run --rm -p 8080:8080 media-merge
-```
-
-Open http://localhost:8080. The page and the API share one origin, so no
-API-URL configuration is needed. Uploaded files and merged zips live in the
-container's temp dir and are cleared when the container stops.
-
-## Tests
-
-```bash
-cd server && go test ./...     # backend unit + HTTP integration tests
-cd web && npm run build        # typecheck + lint + production build
-```
+1. **Exact dedup** — the current skeleton: hash, group, report, delete/move.
+2. **Better reporting** — per-group listings, largest-first sorting, a
+   `-verbose` flag.
+3. **Similar-image grouping** — perceptual hashing to catch resized or
+   re-encoded copies of the same photo. A previous version of this project
+   implemented this as a web app; that code (perceptual hashing with
+   `goimagehash`, clustering, thumbnailing) is preserved in git history:
+   `git show <first-commit>:server/internal/media/`.
