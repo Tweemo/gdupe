@@ -3,8 +3,9 @@
 package dedup
 
 import (
-	"errors"
 	"fmt"
+	"slices"
+	"strings"
 )
 
 // Group is one set of byte-identical files: a keeper plus its copies.
@@ -29,30 +30,67 @@ func (r *Report) DuplicateCount() int {
 }
 
 // WastedBytes returns the total size of all redundant copies.
-//
-// TODO(you): implement — sum the Size of every file in every
-// group's Duplicates slice.
 func (r *Report) WastedBytes() int64 {
-	return 0
+	var wb int64
+	for _, g := range r.Groups {
+		for _, f := range g.Duplicates {
+			wb += f.Size
+		}
+	}
+	return wb
 }
 
 // FindDuplicates groups byte-identical files together.
-//
-// TODO(you): implement.
-//   - Hash each file with HashFile and bucket files by hash
-//     (a map[string][]File works well).
-//   - Buckets with 2+ files become a Group; pick a keeper
-//     deterministically (e.g. the lexicographically smallest path)
-//     so runs are reproducible.
-//   - Buckets with a single file are not duplicates — ignore them.
 func FindDuplicates(files []File) (*Report, error) {
-	return nil, errors.New("dedup.FindDuplicates: not implemented")
+	sizeMap := map[int64][]File{}
+	for _, f := range files {
+		sizeMap[f.Size] = append(sizeMap[f.Size], f)
+	}
+
+	fileMap := map[string][]File{}
+	for _, sameSize := range sizeMap {
+		if len(sameSize) < 2 {
+			continue
+		}
+
+		for _, f := range sameSize {
+			fileHash, err := HashFile(f.Path)
+			if err != nil {
+				return nil, err
+			}
+			fileMap[fileHash] = append(fileMap[fileHash], f)
+		}
+	}
+
+	report := Report{}
+	for _, bucket := range fileMap {
+		if len(bucket) > 1 {
+			slices.SortFunc(bucket, func(a, b File) int {
+				return strings.Compare(a.Path, b.Path)
+			})
+			g := Group{Keeper: bucket[0], Duplicates: bucket[1:]}
+			report.Groups = append(report.Groups, g)
+		}
+	}
+
+	return &report, nil
 }
 
 // FormatSize renders a byte count for humans, e.g. "1.4 MB".
-//
-// TODO(you): implement — divide by 1024 (or 1000, your call) until the
-// value is small, then print with one decimal and the right unit.
 func FormatSize(bytes int64) string {
-	return fmt.Sprintf("%d B", bytes)
+	b := float64(bytes)
+	c := 0 // counter
+
+	unit := []string{"B", "KB", "MB", "GB", "TB", "PB"}
+
+	for b >= 1024 {
+		b = b / 1024
+		c++
+	}
+
+	if c == 0 {
+		return fmt.Sprintf("%d %s", bytes, unit[c])
+	}
+
+	return fmt.Sprintf("%.1f %s", b, unit[c])
 }

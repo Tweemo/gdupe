@@ -1,6 +1,9 @@
 package dedup
 
-import "errors"
+import (
+	"io/fs"
+	"path/filepath"
+)
 
 // File describes one regular file found during a scan.
 type File struct {
@@ -9,12 +12,36 @@ type File struct {
 }
 
 // Scan walks dir recursively and returns every regular file in it.
-//
-// TODO(you): implement.
-//   - Use filepath.WalkDir (or io/fs.WalkDir) to traverse dir.
-//   - Skip directories, symlinks, and other non-regular files.
-//   - Consider skipping the "duplicates" subfolder so a previous
-//     -move run doesn't get re-scanned.
 func Scan(dir string) ([]File, error) {
-	return nil, errors.New("dedup.Scan: not implemented")
+	files := []File{}
+
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if d.Name() == "duplicates" && d.IsDir() {
+			return fs.SkipDir
+		}
+
+		if !d.Type().IsRegular() {
+			return nil
+		}
+
+		entryInfo, err := d.Info()
+		if err != nil {
+			return err
+		}
+
+		fileEntry := File{Path: path, Size: entryInfo.Size()}
+		files = append(files, fileEntry)
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	return files, nil
 }
