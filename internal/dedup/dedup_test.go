@@ -8,7 +8,9 @@ package dedup
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -173,10 +175,15 @@ func TestFormatSize(t *testing.T) {
 }
 
 func TestDeleteRemovesOnlyDuplicates(t *testing.T) {
+	trash := t.TempDir()
+	// a/pic.jpg is the lexicographically-smallest copy, so it is the
+	// keeper; b/pic.jpg and c/pic.jpg are duplicates that share a base
+	// name → naive Base()-naming in the trash would overwrite one.
 	dir := writeTree(t, map[string]string{
-		"keep.jpg": "SAME",
-		"dupe.jpg": "SAME",
-		"solo.jpg": "unique",
+		"a/pic.jpg": "SAME",
+		"b/pic.jpg": "SAME",
+		"c/pic.jpg": "SAME",
+		"solo.jpg":  "unique",
 	})
 	files, err := Scan(dir)
 	if err != nil {
@@ -187,13 +194,53 @@ func TestDeleteRemovesOnlyDuplicates(t *testing.T) {
 		t.Fatalf("FindDuplicates: %v", err)
 	}
 
-	if err := Delete(report); err != nil {
+	if err := Delete(report, trash); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	remaining, _ := filepath.Glob(filepath.Join(dir, "*.jpg"))
-	if len(remaining) != 2 {
-		t.Fatalf("%d files remain, want 2 (one keeper + solo): %v", len(remaining), remaining)
+	// Keeper and the unique file must be untouched.
+	for _, path := range []string{report.Groups[0].Keeper.Path, filepath.Join(dir, "solo.jpg")} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("non-duplicate %q should still exist: %v", path, err)
+		}
+	}
+
+	// Every duplicate must be gone from its original location...
+	for _, d := range report.Groups[0].Duplicates {
+		if _, err := os.Stat(d.Path); !os.IsNotExist(err) {
+			t.Errorf("duplicate %q should have been trashed, stat err = %v", d.Path, err)
+		}
+	}
+
+	// ...and must have arrived in the trash dir without overwriting
+	// each other (b/pic.jpg and c/pic.jpg collide on base name).
+	trashed, _ := filepath.Glob(filepath.Join(trash, "*"))
+	if want := report.DuplicateCount(); len(trashed) != want {
+		t.Fatalf("trash holds %d files, want %d (collision must not overwrite): %v",
+			len(trashed), want, trashed)
+	}
+}
+
+func TestTrashDir(t *testing.T) {
+	dir, err := TrashDir()
+	switch runtime.GOOS {
+	case "darwin", "linux":
+		if err != nil {
+			t.Fatalf("TrashDir on %s: %v", runtime.GOOS, err)
+		}
+		home, herr := os.UserHomeDir()
+		if herr != nil {
+			t.Skipf("no home dir available: %v", herr)
+		}
+		if !strings.HasPrefix(dir, home) {
+			t.Errorf("TrashDir = %q, want a path under home %q", dir, home)
+		}
+	default:
+		// Unsupported OS must refuse loudly, never return a usable-looking
+		// empty path (Rename into "" would scatter files into the CWD).
+		if err == nil {
+			t.Errorf("TrashDir on %s = %q, want error", runtime.GOOS, dir)
+		}
 	}
 }
 

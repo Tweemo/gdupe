@@ -64,7 +64,12 @@ func run(dir string, deleteDupes, moveDupes bool) error {
 
 	switch {
 	case deleteDupes:
-		return dedup.Delete(report)
+		trashDir, err := dedup.TrashDir()
+		if err != nil {
+			return err
+		}
+
+		return dedup.Delete(report, trashDir)
 	case moveDupes:
 		return dedup.Move(report, dir)
 	}
