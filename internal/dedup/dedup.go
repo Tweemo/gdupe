@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
+
+	"golang.org/x/sync/errgroup"
 )
 
 // Group is one set of byte-identical files: a keeper plus its copies.
@@ -17,6 +20,11 @@ type Group struct {
 // Report is the result of a duplicate scan.
 type Report struct {
 	Groups []Group
+}
+
+type FileHash struct {
+	hash string
+	file File
 }
 
 // DuplicateCount returns the total number of redundant copies across
@@ -48,19 +56,39 @@ func FindDuplicates(files []File) (*Report, error) {
 	}
 
 	fileMap := map[string][]File{}
+	ch := make(chan FileHash, len(files))
 	for _, sameSize := range sizeMap {
 		if len(sameSize) < 2 {
 			continue
 		}
 
+		eg := new(errgroup.Group)
 		for _, f := range sameSize {
-			fileHash, err := HashFile(f.Path)
-			if err != nil {
-				return nil, err
-			}
-			fileMap[fileHash] = append(fileMap[fileHash], f)
+			// Launch a goroutine for each file
+			eg.Go(func() error {
+				f := f
+				h, err := HashFile(f.Path)
+				if err == nil {
+					fileHash := FileHash{hash: h, file: f}
+					ch <- fileHash
+				}
+
+				return err
+			})
 		}
+		eg.Wait()
 	}
+	close(ch)
+
+	// Collector routine to write each hashed file to the fileMap
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for fh := range ch {
+			fileMap[fh.hash] = append(fileMap[fh.hash], fh.file)
+		}
+	})
+	// Wait until all hashed files are added to fileMap
+	wg.Wait()
 
 	report := Report{}
 	for _, bucket := range fileMap {
